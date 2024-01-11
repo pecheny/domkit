@@ -376,6 +376,22 @@ class Macros {
 				var e = buildComponentsInit(c, data, pos);
 				if( e != null ) exprs.push(e);
 			}
+            if (!isRoot) {
+				var clt = switch ct.toType() {
+					case TInst(_.get() => clt, params): clt;
+					case _: null;
+				}
+				if (ct != null && clt.meta.has(":postInit")) {
+            		var m = clt.meta.extract(":postInit")[0];
+                    var initFunc = if (m.params.length == 0) "postInit" else {
+                        switch (m.params[0].expr) {
+                            case EConst(CIdent(name)): name;
+                            default: Context.error("Invalid @:postInit(funName)", m.pos);
+                        }
+                    }
+					exprs.push(macro(cast tmp.obj).$initFunc());
+                }
+			}
 			if( isRoot && data.hasContent ) {
 				exprs.unshift(macro var __contentRoot);
 				exprs.push(macro @:privateAccess dom.contentRoot = __contentRoot.contentRoot);
@@ -653,7 +669,35 @@ class Macros {
 		} else if( isComp && !cl.meta.has(":domkitDecl") ) {
 			buildDocument(cl, '<$foundComp></$foundComp>', cl.pos, fields, foundComp);
 		}
+        checkPostInit(fields);
 		return fields;
+	}
+
+	public static function checkPostInit(fields:Array<Field>) {
+		var cl = Context.getLocalClass().get();
+		if (!cl.meta.has(":postInit"))
+			return;
+		var ms = cl.meta.extract(":postInit");
+		if (ms.length > 1)
+			Context.error("Several :postInit meta not supported.", ms[1].pos);
+		var m = ms[0];
+		var initFunc = if (m.params.length == 0) "postInit" else if (m.params.length == 1) {
+			switch (m.params[0].expr) {
+				case EConst(CIdent(name)): name;
+				default: Context.error("Invalid @:postInit(funName)", m.pos);
+			}
+		} else Context.error("Invalid @:postInit(funName)", m.pos);
+
+        var found = false;
+        for (field in fields) {
+            if (field.name == initFunc) {
+                field.meta.push({name:":keep", pos:Context.currentPos()});
+                found = true;
+            }
+        }
+
+        if (!found)
+            Context.error('No valid $initFunc method found.', Context.currentPos());
 	}
 
 	static function error( msg : String, pmin : Int, pmax : Int = -1 ) : Dynamic {
